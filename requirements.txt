@@ -1,0 +1,7 @@
+requests>=2.31.0
+torch>=2.0.0
+transformers>=4.30.0
+sentence-transformers>=2.2.2
+keybert>=0.7.0
+flask>=2.0.0
+flask-cors>=4.0.0 
