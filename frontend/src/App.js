@@ -14,22 +14,26 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Box,
-  CircularProgress
+  CircularProgress,
+  Paper,
+  Chip
 } from '@mui/material';
 import { GitHub as GitHubIcon, Search as SearchIcon } from '@mui/icons-material';
 import axios from 'axios';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import RepoList from './components/RepoList';
 
 const API_BASE_URL = 'http://localhost:5000/api';
 
 function App() {
   const [searchType, setSearchType] = useState('url');
   const [searchInput, setSearchInput] = useState('');
-  const [results, setResults] = useState([]);
+  const [searchResults, setSearchResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [error, setError] = useState(null);
 
   const handleSearchTypeChange = (event, newType) => {
     if (newType !== null) {
@@ -38,29 +42,38 @@ function App() {
   };
 
   const handleSearch = async () => {
-    if (!searchInput.trim()) {
-      toast.error('Please enter a search term');
-      return;
-    }
-
     setLoading(true);
+    setError(null);
+    setSearchResults(null);
+
     try {
       let endpoint = '';
       let payload = {};
 
       if (searchType === 'url') {
-        endpoint = '/related-repos';
-        payload = { url: searchInput };
+        endpoint = 'http://localhost:5000/api/search';
+        payload = { github_url: searchInput };
       } else {
-        endpoint = '/search-by-topic';
+        endpoint = 'http://localhost:5000/api/topic-search';
         payload = { topic: searchInput };
       }
 
-      const response = await axios.post(`${API_BASE_URL}${endpoint}`, payload);
-      setResults(response.data.data);
-    } catch (error) {
-      toast.error(error.response?.data?.error || 'An error occurred');
-      setResults([]);
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch data');
+      }
+
+      const data = await response.json();
+      setSearchResults(data);
+    } catch (err) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -68,10 +81,10 @@ function App() {
 
   const handleCardClick = async (repo) => {
     try {
-      const response = await axios.post(`${API_BASE_URL}/repo-metadata`, {
-        url: repo.url
+      const response = await axios.post(`${API_BASE_URL}/metadata`, {
+        github_url: repo.url
       });
-      setSelectedRepo(response.data.data);
+      setSelectedRepo(response.data);
       setDialogOpen(true);
     } catch (error) {
       toast.error('Failed to fetch detailed information');
@@ -114,60 +127,64 @@ function App() {
   );
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
+    <Container maxWidth="lg">
       <ToastContainer />
       
-      {/* Search Section */}
-      <Box sx={{ mb: 4, display: 'flex', alignItems: 'center', gap: 2 }}>
-        <ToggleButtonGroup
-          value={searchType}
-          exclusive
-          onChange={handleSearchTypeChange}
-          aria-label="search type"
-        >
-          <ToggleButton value="url" aria-label="search by url">
-            <GitHubIcon sx={{ mr: 1 }} />
-            Repository URL
-          </ToggleButton>
-          <ToggleButton value="topic" aria-label="search by topic">
-            <SearchIcon sx={{ mr: 1 }} />
-            Topic
-          </ToggleButton>
-        </ToggleButtonGroup>
+      <Box sx={{ my: 4 }}>
+        <Typography variant="h3" component="h1" gutterBottom align="center">
+          RepoScout
+        </Typography>
+        <Typography variant="h6" component="h2" gutterBottom align="center" color="text.secondary">
+          Discover and analyze GitHub repositories
+        </Typography>
 
-        <TextField
-          fullWidth
-          variant="outlined"
-          placeholder={searchType === 'url' ? 'Enter GitHub repository URL' : 'Enter search topic'}
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+        <Paper elevation={3} sx={{ p: 3, mt: 4 }}>
+          <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
+            <Button
+              variant={searchType === 'url' ? 'contained' : 'outlined'}
+              onClick={() => setSearchType('url')}
+            >
+              Search by URL
+            </Button>
+            <Button
+              variant={searchType === 'topic' ? 'contained' : 'outlined'}
+              onClick={() => setSearchType('topic')}
+            >
+              Search by Topic
+            </Button>
+          </Box>
+
+          <Box sx={{ display: 'flex', gap: 2 }}>
+            <TextField
+              fullWidth
+              label={searchType === 'url' ? 'GitHub Repository URL' : 'Search Topic'}
+              variant="outlined"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder={searchType === 'url' ? 'https://github.com/username/repo' : 'Enter a topic...'}
+            />
+            <Button
+              variant="contained"
+              onClick={handleSearch}
+              disabled={!searchInput || loading}
+            >
+              Search
+            </Button>
+          </Box>
+        </Paper>
+
+        {error && (
+          <Typography color="error" sx={{ mt: 2 }}>
+            Error: {error}
+          </Typography>
+        )}
+
+        <RepoList 
+          searchResults={searchResults} 
+          loading={loading} 
+          onCardClick={handleCardClick}
         />
-
-        <Button
-          variant="contained"
-          onClick={handleSearch}
-          disabled={loading}
-          startIcon={loading ? <CircularProgress size={20} /> : <SearchIcon />}
-        >
-          Search
-        </Button>
       </Box>
-
-      {/* Results Section */}
-      {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-          <CircularProgress />
-        </Box>
-      ) : (
-        <Grid container spacing={3}>
-          {results.map((repo, index) => (
-            <Grid item xs={12} sm={6} md={4} key={index}>
-              <ResultCard repo={repo} />
-            </Grid>
-          ))}
-        </Grid>
-      )}
 
       {/* Detailed View Dialog */}
       <Dialog
@@ -223,19 +240,11 @@ function App() {
                   <Typography variant="subtitle2">Topics</Typography>
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                     {selectedRepo.Topics.map((topic, index) => (
-                      <Typography
+                      <Chip
                         key={index}
-                        variant="body2"
-                        sx={{
-                          bgcolor: 'primary.main',
-                          color: 'white',
-                          px: 1,
-                          py: 0.5,
-                          borderRadius: 1
-                        }}
-                      >
-                        {topic}
-                      </Typography>
+                        label={topic}
+                        size="small"
+                      />
                     ))}
                   </Box>
                 </Grid>
