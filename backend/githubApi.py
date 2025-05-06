@@ -7,7 +7,7 @@ from urllib.parse import quote
 from keybert import KeyBERT
 import time
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 class GitHubAPI:
     def __init__(self, token=None):
@@ -102,47 +102,86 @@ class GitHubAPI:
         }
 
     def fetch_additional_repo_data(self, repo_full_name):
-        # Get Forks
-        forks_url = f"https://api.github.com/repos/{repo_full_name}"
-        forks_response = requests.get(forks_url, headers=self.headers)
-        forks_count = forks_response.json().get("forks_count", 0) if forks_response.status_code == 200 else 0
-
-        # Get Open Issues
-        open_issues_url = f"https://api.github.com/repos/{repo_full_name}/issues"
-        issues_response = requests.get(open_issues_url, headers=self.headers)
-        open_issues_count = len(issues_response.json()) if issues_response.status_code == 200 else 0
-
-        # Get Pull Requests
-        pulls_url = f"https://api.github.com/repos/{repo_full_name}/pulls"
-        pulls_response = requests.get(pulls_url, headers=self.headers)
-        pr_count = len(pulls_response.json()) if pulls_response.status_code == 200 else 0
-
-        # Get Recent Commits
-        commits_url = f"https://api.github.com/repos/{repo_full_name}/commits"
-        commits_response = requests.get(commits_url, headers=self.headers)
-        recent_commits = len(commits_response.json()) if commits_response.status_code == 200 else 0
-
-        # Get repository health
-        health_data = self.calculate_repo_health(repo_full_name)
-
-        # Compute Activity Score
-        activity_score = recent_commits + open_issues_count + pr_count
-
-        return forks_count, activity_score, health_data
+        print(f"\nFetching data for {repo_full_name}")
+        
+        try:
+            # Get repository data in a single API call
+            repo_url = f"https://api.github.com/repos/{repo_full_name}"
+            repo_response = requests.get(repo_url, headers=self.headers)
+            if repo_response.status_code != 200:
+                print(f"WARNING: Failed to fetch repository data: {repo_response.status_code}")
+                return 0, 0, {"health_score": 0, "metrics": {"recent_commits": 0, "avg_issue_resolution_time": 0, "avg_maintainer_response_time": 0}}
+            
+            repo_data = repo_response.json()
+            forks_count = repo_data.get("forks_count", 0)
+            
+            # Get recent activity data in parallel
+            print("Calculating repository health metrics...")
+            
+            # Calculate commit activity (last 30 days)
+            commits_url = f"{repo_url}/commits"
+            commits_response = requests.get(commits_url, headers=self.headers, params={"since": datetime.now(timezone.utc) - timedelta(days=30)})
+            recent_commits = len(commits_response.json()) if commits_response.status_code == 200 else 0
+            print(f"Recent commits: {recent_commits}")
+            
+            # Get open issues count
+            open_issues_count = repo_data.get("open_issues_count", 0)
+            print(f"Open issues: {open_issues_count}")
+            
+            # Get pull requests count (only open PRs)
+            pulls_url = f"{repo_url}/pulls"
+            pulls_response = requests.get(pulls_url, headers=self.headers, params={"state": "open"})
+            pr_count = len(pulls_response.json()) if pulls_response.status_code == 200 else 0
+            print(f"Open PRs: {pr_count}")
+            
+            # Calculate activity score
+            activity_score = recent_commits + open_issues_count + pr_count
+            
+            # Calculate health score
+            commit_score = min(recent_commits * 10, 40)  # Max 40 points for commits
+            issue_ratio = open_issues_count / (repo_data.get("stargazers_count", 1) + 1)  # Issues relative to project size
+            issue_score = max(30 - (issue_ratio * 100), 0)  # Max 30 points for issue management
+            pr_ratio = pr_count / (repo_data.get("stargazers_count", 1) + 1)  # PRs relative to project size
+            pr_score = max(30 - (pr_ratio * 100), 0)  # Max 30 points for PR management
+            
+            health_score = commit_score + issue_score + pr_score
+            
+            health_data = {
+                "health_score": round(health_score, 1),
+                "metrics": {
+                    "recent_commits": recent_commits,
+                    "open_issues": open_issues_count,
+                    "open_prs": pr_count,
+                    "commit_score": round(commit_score, 1),
+                    "issue_score": round(issue_score, 1),
+                    "pr_score": round(pr_score, 1)
+                }
+            }
+            
+            print(f"Health Score: {health_score:.1f}/100")
+            print(f"Finished processing {repo_full_name}\n")
+            
+            return forks_count, activity_score, health_data
+            
+        except Exception as e:
+            print(f"ERROR: Failed to process {repo_full_name}: {str(e)}")
+            return 0, 0, {"health_score": 0, "metrics": {"recent_commits": 0, "avg_issue_resolution_time": 0, "avg_maintainer_response_time": 0}}
 
     def search_repos_by_topic(self, topic):
         encoded_query = quote(topic)
-        url = f"https://api.github.com/search/repositories?q={encoded_query}"
-        print(f"Searching GitHub with query: {url}")
+        url = f"https://api.github.com/search/repositories?q={encoded_query}&sort=stars&order=desc&per_page=20"
+        print(f"\nSearching GitHub for: {topic}")
         response = requests.get(url, headers=self.headers)
 
         if response.status_code == 200:
             data = response.json()
             repos = data.get("items", [])
-            print(f"Found {len(repos)} repositories for the topic: {topic}")
+            total_count = data.get("total_count", 0)
+            print(f"Found {total_count} total repositories")
+            print(f"Processing top {len(repos)} repositories by stars\n")
             return repos
         else:
-            print(f"Failed to fetch data for topic '{topic}'. Status Code: {response.status_code}")
+            print(f"ERROR: Failed to fetch data for topic '{topic}'. Status Code: {response.status_code}")
             return []
 
     def get_unique_languages(self, repos):
@@ -241,12 +280,20 @@ class RelatedRepoFinder:
 
     def rank_repositories(self, repos, topic, selected_languages=None):
         ranked_repos = []
-        for repo_data in repos:
+        total = len(repos)
+        print(f"\nRanking {total} repositories...")
+        
+        for idx, repo_data in enumerate(repos, 1):
+            print(f"\nProcessing repository {idx}/{total}")
+            
             # Skip if language filter is active and repo doesn't match
             if selected_languages and repo_data.get("language") not in selected_languages:
+                print(f"Skipping {repo_data['full_name']} - language not in filter")
                 continue
 
             repo_full_name = repo_data["full_name"]
+            print(f"Repository: {repo_full_name}")
+            
             forks_count, activity_score, health_data = self.github_api.fetch_additional_repo_data(repo_full_name)
             description = repo_data.get("description", "")
             language = repo_data.get("language", "")
@@ -256,17 +303,27 @@ class RelatedRepoFinder:
                 topics = repo_data.get("topics", [])
                 if topics:
                     description = " ".join(topics)
+                    print(f"Using topics as description: {description}")
                 else:
                     description = repo_data.get("name", "")
+                    print(f"Using name as description: {description}")
             
             # Compute relevance score using SBERT
+            print("Computing relevance score...")
             topic_similarity = self.semantic_analyzer.compute_similarity(topic, description)
             language_match = 1 if topic.lower() in (language or "").lower() else 0
             relevance_score = (topic_similarity * 0.8) + (language_match * 0.2)
+            print(f"Relevance score: {relevance_score:.2f}")
 
-            # Compute final weighted score with increased relevance weight
-            # New weights: relevance (40%), stars (20%), forks (15%), activity (15%), health (10%)
-            final_score = (relevance_score * 0.4) + (stars * 0.2) + (forks_count * 0.15) + (activity_score * 0.15) + (health_data["health_score"] * 0.1)
+            # Compute final weighted score with equal emphasis on similarity and health
+            final_score = (
+                (relevance_score * 0.4) +  # Relevance weight
+                (stars * 0.1) +            # Stars weight reduced
+                (forks_count * 0.1) +      # Forks weight reduced
+                (activity_score * 0.1) +    # Activity weight reduced
+                (health_data["health_score"] * 0.3)  # Health weight increased
+            )
+            print(f"Final score: {final_score:.2f}")
 
             ranked_repos.append({
                 "name": repo_data["name"],
@@ -280,13 +337,14 @@ class RelatedRepoFinder:
                 "language": language,
                 "health": health_data,
                 "description": description,
-                "topics": repo_data.get("topics", []),
-                "health_score": health_data["health_score"]  # Add health score for easier access
+                "topics": repo_data.get("topics", [])
             })
 
-        # Sort by final score and return all repositories
+        # Sort by final score and return top 10
         ranked_repos = sorted(ranked_repos, key=lambda x: x["final_score"], reverse=True)
-        return ranked_repos
+        print(f"\nFinished ranking {len(ranked_repos)} repositories")
+        print(f"Returning top 10 repositories based on combined similarity and health scores")
+        return ranked_repos[:10]  # Return only top 10
 
     def find_related_repositories(self, github_url):
         owner, repo = self.github_api.extract_repo_details(github_url)
