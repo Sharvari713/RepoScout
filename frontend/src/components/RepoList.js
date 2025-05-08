@@ -42,12 +42,12 @@ const RepoList = ({ searchResults, loading, onCardClick }) => {
           {label}
         </Typography>
         <Typography variant="caption" color="text.secondary">
-          {(score * 100).toFixed(1)}%
+          {typeof score === 'number' ? (score * 100).toFixed(1) : '0.0'}%
         </Typography>
       </Box>
       <LinearProgress 
         variant="determinate" 
-        value={score * 100} 
+        value={typeof score === 'number' ? score * 100 : 0} 
         sx={{ 
           height: 4,
           borderRadius: 2,
@@ -61,35 +61,28 @@ const RepoList = ({ searchResults, loading, onCardClick }) => {
   );
 
   const HealthScore = ({ score }) => {
-    const getHealthColor = (score) => {
-      if (score >= 80) return 'success.main';
-      if (score >= 60) return 'warning.main';
-      return 'error.main';
-    };
-
+    const healthScore = typeof score === 'number' ? score : 0;
+    const color = healthScore >= 80 ? 'success' : healthScore >= 60 ? 'warning' : 'error';
+    
     return (
-      <Box sx={{ mb: 1 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-          <HealthAndSafety sx={{ fontSize: 16 }} />
-          <Typography variant="caption" color="text.secondary">
-            Health Score
-          </Typography>
-          <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
-            {score.toFixed(1)}%
-          </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <HealthAndSafety color={color} />
+        <Box sx={{ width: '100%' }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+            <Typography variant="body2" color="text.secondary">
+              Health Score
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {healthScore.toFixed(1)}%
+            </Typography>
+          </Box>
+          <LinearProgress 
+            variant="determinate" 
+            value={healthScore} 
+            color={color}
+            sx={{ height: 6, borderRadius: 1 }}
+          />
         </Box>
-        <LinearProgress 
-          variant="determinate" 
-          value={score} 
-          sx={{ 
-            height: 4,
-            borderRadius: 2,
-            backgroundColor: 'grey.200',
-            '& .MuiLinearProgress-bar': {
-              backgroundColor: getHealthColor(score)
-            }
-          }}
-        />
       </Box>
     );
   };
@@ -200,27 +193,27 @@ const RepoList = ({ searchResults, loading, onCardClick }) => {
                     )}
                   </Box>
 
-                  <HealthScore score={repo.health_score} />
+                  <HealthScore score={repo.health?.health_score || 0} />
 
                   {repoScore && (
                     <Box sx={{ mt: 2 }}>
                       <Typography variant="subtitle2" gutterBottom>
-                        Match Score: {(repoScore.score * 100).toFixed(1)}%
+                        Match Score: {typeof repoScore.score === 'number' ? (repoScore.score * 100).toFixed(1) : '0.0'}%
                       </Typography>
                       <SimilarityScore 
-                        score={repoScore.field_scores.description} 
+                        score={repoScore.field_scores?.description || 0} 
                         label="Description Match" 
                       />
                       <SimilarityScore 
-                        score={repoScore.field_scores.topics} 
+                        score={repoScore.field_scores?.topics || 0} 
                         label="Topics Match" 
                       />
                       <SimilarityScore 
-                        score={repoScore.field_scores.language} 
+                        score={repoScore.field_scores?.language || 0} 
                         label="Language Match" 
                       />
                       <SimilarityScore 
-                        score={repoScore.field_scores.name} 
+                        score={repoScore.field_scores?.name || 0} 
                         label="Name Match" 
                       />
                     </Box>

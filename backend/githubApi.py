@@ -169,7 +169,7 @@ class GitHubAPI:
 
     def search_repos_by_topic(self, topic):
         encoded_query = quote(topic)
-        url = f"https://api.github.com/search/repositories?q={encoded_query}&sort=stars&order=desc&per_page=20"
+        url = f"https://api.github.com/search/repositories?q={encoded_query}&sort=stars&order=desc"
         print(f"\nSearching GitHub for: {topic}")
         response = requests.get(url, headers=self.headers)
 
@@ -315,14 +315,8 @@ class RelatedRepoFinder:
             relevance_score = (topic_similarity * 0.8) + (language_match * 0.2)
             print(f"Relevance score: {relevance_score:.2f}")
 
-            # Compute final weighted score with equal emphasis on similarity and health
-            final_score = (
-                (relevance_score * 0.4) +  # Relevance weight
-                (stars * 0.1) +            # Stars weight reduced
-                (forks_count * 0.1) +      # Forks weight reduced
-                (activity_score * 0.1) +    # Activity weight reduced
-                (health_data["health_score"] * 0.3)  # Health weight increased
-            )
+            # Compute final weighted score
+            final_score = (relevance_score * 0.4) + (stars * 0.2) + (forks_count * 0.15) + (activity_score * 0.15) + (health_data["health_score"] * 0.1)
             print(f"Final score: {final_score:.2f}")
 
             ranked_repos.append({
@@ -340,11 +334,10 @@ class RelatedRepoFinder:
                 "topics": repo_data.get("topics", [])
             })
 
-        # Sort by final score and return top 10
+        # Sort by final score
         ranked_repos = sorted(ranked_repos, key=lambda x: x["final_score"], reverse=True)
         print(f"\nFinished ranking {len(ranked_repos)} repositories")
-        print(f"Returning top 10 repositories based on combined similarity and health scores")
-        return ranked_repos[:10]  # Return only top 10
+        return ranked_repos
 
     def find_related_repositories(self, github_url):
         owner, repo = self.github_api.extract_repo_details(github_url)

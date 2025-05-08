@@ -66,14 +66,17 @@ function App() {
         body: JSON.stringify(payload),
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error('Failed to fetch data');
+        throw new Error(data.error || 'Failed to fetch data');
       }
 
-      const data = await response.json();
       setSearchResults(data);
     } catch (err) {
+      console.error('Search error:', err);
       setError(err.message);
+      toast.error(err.message);
     } finally {
       setLoading(false);
     }
